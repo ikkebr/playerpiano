@@ -9,8 +9,6 @@ Original idea & minor tty frobage from Ian Bicking.  Thanks Ian!
 """
 
 import doctest
-import termios
-import tty
 import sys
 import argparse
 import re
@@ -18,8 +16,17 @@ import os.path
 import importlib
 import contextlib
 
+try:
+    # unix only
+    import termios
+    import tty
+except ImportError:
+    # windows
+    import msvcrt
+
+
 @contextlib.contextmanager
-def frob_tty():
+def frob_tty_unix():
     """massage the terminal to not echo characters & the like"""
     stdin_fd = sys.stdin.fileno()
     old_mask = termios.tcgetattr(stdin_fd)
@@ -29,18 +36,30 @@ def frob_tty():
     termios.tcsetattr(stdin_fd, termios.TCSADRAIN, new)
     tty.setraw(stdin_fd)
     try:
-        yield
+        yield eat_key_unix
     finally:
         # restore the terminal to its original state
         termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_mask)
 
-def eat_key():
+@contextlib.contextmanager
+def frob_tty_win():
+    yield eat_key_win
+
+
+frob_tty = frob_tty_unix if 'tty' in globals() else frob_tty_win
+
+def eat_key_unix():
     """consume a key.  Exit on ^C"""
     c = sys.stdin.read(1)
     if c == '\x03': # ^C
-        sys.exit(1)
-    else:
-        return c
+        raise SystemExit(1)
+    return c
+
+def eat_key_win():
+    c = msvcrt.getwch()
+    if c == '\x03': # ^C
+        raise SystemExit(1)
+    return c
 
 banner = '''Python {sys.version} on {sys.platform}
 Type "help", "copyright", "credits" or "license" for more information.
@@ -84,7 +103,7 @@ def write(s):
     for t in targets.values():
         t(s)
 
-def run(tests, highlight):
+def run(tests, highlight, eat_key):
     # clear the screen to hide the command we were invoked with & write banner
     if sys.platform == 'nt':
         os.system('cls')
@@ -173,8 +192,8 @@ def main():
         tests = doctests_from_module(options.file)
 
     try:
-        with frob_tty():
-            run(tests, highlight)
+        with frob_tty() as eat_key:
+            run(tests, highlight, eat_key)
     finally:
         for t in list(targets.keys()):
             del targets[t]
