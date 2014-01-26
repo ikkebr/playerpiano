@@ -26,8 +26,11 @@ except ImportError:
 
 
 @contextlib.contextmanager
-def frob_tty_unix():
+def frob_tty():
     """massage the terminal to not echo characters & the like"""
+    if not 'tty' in globals():
+        yield
+        return
     stdin_fd = sys.stdin.fileno()
     old_mask = termios.tcgetattr(stdin_fd)
     new = old_mask[:]
@@ -36,27 +39,17 @@ def frob_tty_unix():
     termios.tcsetattr(stdin_fd, termios.TCSADRAIN, new)
     tty.setraw(stdin_fd)
     try:
-        yield eat_key_unix
+        yield
     finally:
         # restore the terminal to its original state
         termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_mask)
 
-@contextlib.contextmanager
-def frob_tty_win():
-    yield eat_key_win
-
-
-frob_tty = frob_tty_unix if 'tty' in globals() else frob_tty_win
-
-def eat_key_unix():
+def eat_key():
     """consume a key.  Exit on ^C"""
-    c = sys.stdin.read(1)
-    if c == '\x03': # ^C
-        raise SystemExit(1)
-    return c
-
-def eat_key_win():
-    c = msvcrt.getwch()
+    if 'tty' in globals():
+        c = sys.stdin.read(1)
+    else:
+        c = msvcrt.getwch()
     if c == '\x03': # ^C
         raise SystemExit(1)
     return c
@@ -103,7 +96,7 @@ def write(s):
     for t in targets.values():
         t(s)
 
-def run(tests, highlight, eat_key):
+def run(tests, highlight):
     # clear the screen to hide the command we were invoked with & write banner
     if sys.platform == 'nt':
         os.system('cls')
@@ -192,8 +185,8 @@ def main():
         tests = doctests_from_module(options.file)
 
     try:
-        with frob_tty() as eat_key:
-            run(tests, highlight, eat_key)
+        with frob_tty():
+            run(tests, highlight)
     finally:
         for t in list(targets.keys()):
             del targets[t]
